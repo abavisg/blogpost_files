@@ -1,0 +1,159 @@
+default_platform :ios
+
+platform :ios do
+
+    # BEFORE LANES
+
+    before_all do
+        
+        ENV["VERSION_NUMBER"] = get_version_number
+        ENV["BUILD_NUMBER"] = get_build_number
+        ENV["VERSION_BUILD_DISPLAY"] = get_version_and_build_display
+        
+        ENV["SLACK_URL"] = "SLACK_HOOK_URL"
+        
+        clear_derived_data
+    end
+    
+    # PUBLIC LANES
+    
+    desc "Generate adHoc build for Fabric"
+    desc "Steps:"
+    desc "- Set environment variables"
+    desc "- Add tag with Version & Build number in app icon (only for the beta ap icon)"
+    desc "- Update application identifier to match adhoc provisioning profile"
+    desc "- Create AdHoc archive"
+    desc "- Upload to Crahlytics"
+    # desc "- Post message to slack"
+    lane :beta do |options|
+        log("STARTING LANE BETA...")
+        
+        #set environment variables top adhoc
+        ENV["APP_IDENTIFIER"] = "ADHOC_APP_ID"
+        log("GENERATING ADHOC BUILD WITH BUNDLE ID: #{ENV["APP_IDENTIFIER"]}")
+        
+        #add tag with version and build number in app icon
+        tag_the_badge
+    
+        #Update app identifier to adhoc
+        update_identifier
+        
+        #Gym
+        gym_it
+        
+        #Crashlytics
+        upload_crashlytics groups:options[:groups]
+        
+        #Post to slack
+        post_to_slack
+        
+        #set environment variables to DEV
+        ENV["APP_IDENTIFIER"] = "DEV_APP_ID"
+        log("SETTING APP IDENTIFIER TO DEV: #{ENV["APP_IDENTIFIER"]}")
+        
+        #Update app identifier to DEV
+        update_identifier
+        
+    end
+    
+    # PRIVATE LANES 
+    
+    desc "Add a tag in the app icon with the version and the build number"
+    private_lane :tag_the_badge do
+        
+        log("CREATING NEW APP ICONS")
+        
+        badgeDisplay = get_badge_text
+        badge(
+            glob: "/**/*-beta.appiconset/*.{png,PNG}",
+            shield: badgeDisplay,
+            no_badge: false,
+            shield_no_resize: true,
+            shield_gravity: "north"
+        )
+    end
+    
+    desc "update app identifier to match adhoc provisioning profile"
+    private_lane :update_identifier do 
+        log("UPDATING APP IDENTIFIER")
+        update_app_identifier(
+            xcodeproj:  "APP_NAME.xcodeproj",
+            plist_path: "PATH_TO/Info.plist",
+            app_identifier: ENV["APP_IDENTIFIER"]
+        )
+    end
+    
+    desc "Create an adhoc archive"
+    private_lane :gym_it do
+        
+        log("ARCHIVING FOR ADHOC DISTRIBUTION: #{ENV["VERSION_BUILD_DISPLAY"]}")
+        gym(
+            workspace: "APP_NAME.xcworkspace",
+            scheme: "ADHOC_SCHEME_NAME",
+            output_name: "OUTPUT_NAME",
+            configuration: "AdHoc"
+        )
+    end
+    
+    desc "Upload to Crashlytics at the specified group"
+    private_lane :upload_crashlytics do |options| 
+        
+        groups = options[:groups]
+        if (groups == nil)
+            groups = "developers"
+        end
+        notes = "Weengs #{ENV["VERSION_BUILD_DISPLAY"]} AdHoc Build Distribution"
+        log("UPLOADING TO CRASHLYTICS & NOTIFYING GROUPS: #{groups}")
+        crashlytics(
+            api_token: "CRASHLYTICS_TOKEN",
+            build_secret: "CRASHLYTICS_SECRET",
+            groups: groups,
+            notes: notes
+        )
+    end
+    
+    desc "Post to Slack"
+    private_lane :post_to_slack do
+    
+        log("POSTING TO SLACK")
+    
+        version     = ENV["VERSION_NUMBER"]
+        build       = ENV["BUILD_NUMBER"]
+        slack(
+            message: "<!here|here>: New :iOS: *#{version}* (#{build})"
+        )
+
+    end
+
+    # AFTER LANES
+
+    after_all do |lane|
+        notification(title: "Fastlane", subtitle: "'#{lane}' result", message: "Finished lane '#{lane}' successfully") 
+    end
+
+    error do |lane, exception|
+        notification(title: "Fastlane", subtitle: "'#{lane}' result", message: "Finished lane '#{lane}' with error") 
+    end
+    
+    # HELPER FUNCTIONS
+
+    def log(message)
+        UI.header message
+    end
+
+    def get_badge_text
+        ENV["VERSION_NUMBER"] + "-" + ENV["BUILD_NUMBER"] + "-" + "red"
+    end
+    
+    def get_version_and_build_display 
+        "#{ENV["VERSION_NUMBER"]}_#{ENV["BUILD_NUMBER"]}"
+    end
+
+    def get_build_number
+      `/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' ../PATH_TO/Info.plist`.strip
+    end
+
+    def get_version_number
+      `/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' ../PATH_TO/Info.plist`.strip
+    end
+end

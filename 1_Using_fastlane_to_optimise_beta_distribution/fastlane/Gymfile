@@ -1,0 +1,5 @@
+clean true
+output_directory "./build"  #where to store the adhoc ipa
+export_method "ad-hoc"      #          
+#use_legacy_build_api true
+
